@@ -22,7 +22,7 @@ debug/
 debug_*.html
 debug_*.png
 *.png
-*.html
+
 
 # Output files
 linkedin_profiles.csv
