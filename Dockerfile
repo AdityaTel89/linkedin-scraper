@@ -61,5 +61,5 @@ ENV PORT=8080
 # Expose port
 EXPOSE 8080
 
-# Run with gunicorn (Railway will provide $PORT)
+# Run with gunicorn using shell form to expand variables
 CMD gunicorn --bind 0.0.0.0:$PORT --workers 1 --threads 8 --timeout 300 app:app
