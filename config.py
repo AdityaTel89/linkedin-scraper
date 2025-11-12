@@ -1,13 +1,19 @@
 """
 Production-ready configuration for LinkedIn Scraper
 Uses environment variables for sensitive data
+Optimized for Railway deployment
 """
 
 import os
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
+# Load environment variables from .env file (for local development)
 load_dotenv()
+
+# ==================== ENVIRONMENT DETECTION ====================
+# Detect Railway production environment
+IS_RAILWAY = os.getenv('RAILWAY_ENVIRONMENT') is not None
+IS_PRODUCTION = IS_RAILWAY or os.getenv('FLASK_ENV', 'development') == 'production'
 
 # ==================== AUTHENTICATION ====================
 # LinkedIn credentials - NEVER hardcode in production!
@@ -17,7 +23,7 @@ LINKEDIN_PASSWORD = os.getenv('LINKEDIN_PASSWORD', '')
 # Validate credentials are set
 if not LINKEDIN_EMAIL or not LINKEDIN_PASSWORD:
     print("⚠️  WARNING: LinkedIn credentials not set in environment variables")
-    print("   Please create a .env file with LINKEDIN_EMAIL and LINKEDIN_PASSWORD")
+    print("   Please set LINKEDIN_EMAIL and LINKEDIN_PASSWORD in Railway dashboard")
 
 # ==================== FILE PATHS ====================
 # Base directory
@@ -49,8 +55,8 @@ MAX_RETRIES = int(os.getenv('MAX_RETRIES', '3'))  # Maximum retry attempts for f
 RETRY_DELAY = int(os.getenv('RETRY_DELAY', '60'))  # Delay before retry (seconds)
 
 # ==================== BROWSER CONFIGURATION ====================
-# Chrome options
-HEADLESS_MODE = os.getenv('HEADLESS_MODE', 'False').lower() == 'true'
+# Chrome options - Auto-enable headless mode on Railway
+HEADLESS_MODE = IS_PRODUCTION or os.getenv('HEADLESS_MODE', 'False').lower() == 'true'
 
 # Browser window size
 WINDOW_WIDTH = int(os.getenv('WINDOW_WIDTH', '1920'))
@@ -63,15 +69,15 @@ PAGE_LOAD_TIMEOUT = int(os.getenv('PAGE_LOAD_TIMEOUT', '30'))
 ELEMENT_WAIT_TIMEOUT = int(os.getenv('ELEMENT_WAIT_TIMEOUT', '20'))
 
 # ==================== USER AGENTS ====================
-# User agents for rotation (latest browsers)
+# User agents for rotation (latest browsers - Linux for production)
 USER_AGENTS = [
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:123.0) Gecko/20100101 Firefox/123.0",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.2 Safari/605.1.15"
+    "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0",
 ]
 
 # ==================== PROXY CONFIGURATION ====================
@@ -115,9 +121,9 @@ MAX_HEADLINE_LENGTH = int(os.getenv('MAX_HEADLINE_LENGTH', '300'))
 MAX_POSITION_LENGTH = int(os.getenv('MAX_POSITION_LENGTH', '500'))
 
 # ==================== FEATURE FLAGS ====================
-# Enable/disable features
-SAVE_DEBUG_HTML = os.getenv('SAVE_DEBUG_HTML', 'True').lower() == 'true'
-SAVE_DEBUG_SCREENSHOTS = os.getenv('SAVE_DEBUG_SCREENSHOTS', 'True').lower() == 'true'
+# Enable/disable features - Disable debug in production for performance
+SAVE_DEBUG_HTML = (not IS_PRODUCTION) and os.getenv('SAVE_DEBUG_HTML', 'True').lower() == 'true'
+SAVE_DEBUG_SCREENSHOTS = (not IS_PRODUCTION) and os.getenv('SAVE_DEBUG_SCREENSHOTS', 'True').lower() == 'true'
 ENABLE_CAPTCHA_DETECTION = os.getenv('ENABLE_CAPTCHA_DETECTION', 'True').lower() == 'true'
 
 # ==================== SECURITY ====================
@@ -126,11 +132,13 @@ ALLOWED_DOMAINS = ['linkedin.com', 'www.linkedin.com']  # Only allow LinkedIn UR
 
 # ==================== FLASK APP CONFIGURATION ====================
 # Flask settings (for web UI)
-FLASK_ENV = os.getenv('FLASK_ENV', 'production')
+FLASK_ENV = 'production' if IS_PRODUCTION else os.getenv('FLASK_ENV', 'development')
 FLASK_SECRET_KEY = os.getenv('FLASK_SECRET_KEY', os.urandom(24).hex())
+
+# Railway provides PORT environment variable automatically
 FLASK_HOST = os.getenv('FLASK_HOST', '0.0.0.0')
-FLASK_PORT = int(os.getenv('FLASK_PORT', '5000'))
-FLASK_DEBUG = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+FLASK_PORT = int(os.getenv('PORT', os.getenv('FLASK_PORT', '8080')))  # Railway uses PORT
+FLASK_DEBUG = (not IS_PRODUCTION) and os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
 
 # ==================== CONFIGURATION VALIDATION ====================
 def validate_config():
@@ -156,6 +164,10 @@ def validate_config():
     if USE_PROXY and not PROXY_URL:
         errors.append("USE_PROXY is enabled but proxy details are incomplete")
     
+    # Railway-specific warnings
+    if IS_RAILWAY and not HEADLESS_MODE:
+        warnings.append("Running on Railway but HEADLESS_MODE is disabled - this may cause issues")
+    
     # Display results
     if errors:
         print("\n❌ Configuration Errors:")
@@ -177,6 +189,8 @@ def display_config():
     print("LinkedIn Scraper Configuration")
     print("="*60)
     print(f"Environment: {FLASK_ENV}")
+    print(f"Platform: {'Railway' if IS_RAILWAY else 'Local/Other'}")
+    print(f"Production Mode: {IS_PRODUCTION}")
     print(f"Headless Mode: {HEADLESS_MODE}")
     print(f"Min Delay: {MIN_DELAY}s")
     print(f"Max Delay: {MAX_DELAY}s")
@@ -187,9 +201,13 @@ def display_config():
     print(f"Debug Screenshots: {SAVE_DEBUG_SCREENSHOTS}")
     print(f"Output CSV: {OUTPUT_CSV}")
     print(f"Log Level: {LOG_LEVEL}")
+    print(f"Flask Port: {FLASK_PORT}")
     print("="*60 + "\n")
 
-# Auto-validate on import (only in development)
-if FLASK_ENV == 'development':
+# Auto-validate on import (only show warnings in production)
+if not IS_PRODUCTION:
     if not validate_config():
         print("\n⚠️  Please fix configuration errors before running the scraper\n")
+else:
+    # In production, just validate silently
+    validate_config()

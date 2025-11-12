@@ -9,6 +9,8 @@ from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
 from selenium_stealth import stealth
 from bs4 import BeautifulSoup
 import config
@@ -25,13 +27,19 @@ class LinkedInScraper:
         # Check if we should run headless (from config)
         if config.HEADLESS_MODE:
             print("   🎭 Running in HEADLESS mode (production)")
-            # Stable headless settings for production
+            # Production headless settings for Railway
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
             chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-software-rasterizer')
             chrome_options.add_argument('--window-size=1920,1080')
             chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-setuid-sandbox')
+            chrome_options.add_argument('--remote-debugging-port=9222')
+            
+            # Binary location for Docker/Railway (if Chrome is in standard location)
+            chrome_options.binary_location = '/usr/bin/google-chrome'
         else:
             print("   🖥️  Running in VISIBLE mode (local development)")
             # Non-headless settings for local testing
@@ -46,22 +54,32 @@ class LinkedInScraper:
         user_agent = random.choice(config.USER_AGENTS)
         chrome_options.add_argument(f'user-agent={user_agent}')
         
-        # Initialize driver with error handling
+        # Initialize driver with webdriver-manager for automatic driver management
         try:
-            print("   🔧 Attempting to initialize Chrome...")
-            self.driver = webdriver.Chrome(options=chrome_options)
+            print("   🔧 Attempting to initialize Chrome with webdriver-manager...")
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
             print("   ✅ Chrome initialized successfully")
         except Exception as e:
             print(f"   ⚠️ Error initializing Chrome: {e}")
             print("   🔄 Trying fallback Chrome setup...")
-            # Minimal fallback options
+            
+            # Fallback: try without binary location
             chrome_options_fallback = webdriver.ChromeOptions()
             if config.HEADLESS_MODE:
-                chrome_options_fallback.add_argument('--headless')
+                chrome_options_fallback.add_argument('--headless=new')
             chrome_options_fallback.add_argument('--no-sandbox')
             chrome_options_fallback.add_argument('--disable-dev-shm-usage')
-            self.driver = webdriver.Chrome(options=chrome_options_fallback)
-            print("   ✅ Chrome initialized with fallback settings")
+            chrome_options_fallback.add_argument('--disable-gpu')
+            chrome_options_fallback.add_argument('--remote-debugging-port=9222')
+            
+            try:
+                service_fallback = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service_fallback, options=chrome_options_fallback)
+                print("   ✅ Chrome initialized with fallback settings")
+            except Exception as e2:
+                print(f"   ❌ Fallback also failed: {e2}")
+                raise Exception(f"Chrome initialization failed: {e2}")
         
         # Apply stealth settings
         platform_val = "Linux" if config.HEADLESS_MODE else "Win32"
