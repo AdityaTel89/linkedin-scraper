@@ -22,21 +22,22 @@ class LinkedInScraper:
         # Setup Chrome options
         chrome_options = webdriver.ChromeOptions()
         
-        # Production/deployment settings (Railway, Render, etc.)
-        chrome_options.add_argument('--headless=new')
-        chrome_options.add_argument('--no-sandbox')
-        chrome_options.add_argument('--disable-dev-shm-usage')
-        chrome_options.add_argument('--disable-gpu')
-        chrome_options.add_argument('--disable-software-rasterizer')
-        chrome_options.add_argument('--disable-extensions')
-        chrome_options.add_argument('--disable-setuid-sandbox')
-        chrome_options.add_argument('--single-process')
-        chrome_options.add_argument('--disable-web-security')
+        # Check if we should run headless (from config)
+        if config.HEADLESS_MODE:
+            print("   🎭 Running in HEADLESS mode (production)")
+            # Stable headless settings for production
+            chrome_options.add_argument('--headless=new')
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--window-size=1920,1080')
+            chrome_options.add_argument('--disable-extensions')
+        else:
+            print("   🖥️  Running in VISIBLE mode (local development)")
+            # Non-headless settings for local testing
+            chrome_options.add_argument("--start-maximized")
         
-        # Window size for headless
-        chrome_options.add_argument('--window-size=1920,1080')
-        
-        # Anti-detection
+        # Common settings (both headless and visible)
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -52,19 +53,22 @@ class LinkedInScraper:
             print("   ✅ Chrome initialized successfully")
         except Exception as e:
             print(f"   ⚠️ Error initializing Chrome: {e}")
-            print("   🔄 Trying alternative Chrome setup...")
-            # Try without some problematic options
+            print("   🔄 Trying fallback Chrome setup...")
+            # Minimal fallback options
             chrome_options_fallback = webdriver.ChromeOptions()
-            chrome_options_fallback.add_argument('--headless')
+            if config.HEADLESS_MODE:
+                chrome_options_fallback.add_argument('--headless')
             chrome_options_fallback.add_argument('--no-sandbox')
             chrome_options_fallback.add_argument('--disable-dev-shm-usage')
             self.driver = webdriver.Chrome(options=chrome_options_fallback)
+            print("   ✅ Chrome initialized with fallback settings")
         
         # Apply stealth settings
+        platform_val = "Linux" if config.HEADLESS_MODE else "Win32"
         stealth(self.driver,
                 languages=["en-US", "en"],
                 vendor="Google Inc.",
-                platform="Linux",
+                platform=platform_val,
                 webgl_vendor="Intel Inc.",
                 renderer="Intel Iris OpenGL Engine",
                 fix_hairline=True)
@@ -109,11 +113,19 @@ class LinkedInScraper:
                 return True
             elif "checkpoint" in current_url or "challenge" in current_url:
                 print("⚠️  LinkedIn security challenge detected!")
-                print("   Please complete verification in the browser window...")
-                return False  # Can't handle CAPTCHA in headless mode
+                if not config.HEADLESS_MODE:
+                    print("   Please complete verification in the browser window...")
+                    input("   Press Enter after completing the challenge...")
+                    return True
+                else:
+                    print("   Cannot handle CAPTCHA in headless mode")
+                    return False
             else:
                 print("⚠️  Login status unclear")
                 print(f"   Current URL: {current_url}")
+                if not config.HEADLESS_MODE:
+                    input("   Press Enter to continue if you see you're logged in...")
+                    return True
                 return False
                 
         except Exception as e:
@@ -152,7 +164,6 @@ class LinkedInScraper:
             
             if "feed" in current_url or current_url == "https://www.linkedin.com/":
                 print("   ⚠️  WARNING: Redirected to feed instead of profile")
-                # Try again with different approach
                 time.sleep(5)
                 self.driver.get(profile_url)
                 time.sleep(8)
@@ -161,7 +172,7 @@ class LinkedInScraper:
             self._scroll_page()
             time.sleep(random.uniform(3, 5))
             
-            # Extract data using text-based method (most reliable)
+            # Extract data using text-based method
             profile_data = self._extract_from_page_text(profile_url)
             
             # Show what we extracted
@@ -175,7 +186,7 @@ class LinkedInScraper:
             return self._create_error_profile(profile_url, str(e))
     
     def _extract_from_page_text(self, url):
-        """Extract profile data from page text - Most reliable method with clean filtering"""
+        """Extract profile data from page text"""
         profile_data = {'url': url}
         
         try:
@@ -183,7 +194,7 @@ class LinkedInScraper:
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
             lines = [line.strip() for line in page_text.split('\n') if line.strip()]
             
-            # Remove duplicates while preserving order
+            # Remove duplicates
             seen = set()
             unique_lines = []
             for line in lines:
@@ -193,7 +204,7 @@ class LinkedInScraper:
             
             lines = unique_lines
             
-            # Keywords to skip (navigation and footer)
+            # Skip keywords
             skip_keywords = [
                 'home', 'my network', 'jobs', 'messaging', 'notifications', 'search', 
                 'menu', 'for business', 'accessibility', 'linkedin corporation',
@@ -202,7 +213,7 @@ class LinkedInScraper:
                 'safety center', '© 2025', 'try premium'
             ]
             
-            # Filter out footer and navigation lines
+            # Filter lines
             filtered_lines = []
             for line in lines:
                 line_lower = line.lower()
@@ -211,123 +222,72 @@ class LinkedInScraper:
             
             lines = filtered_lines
             
-            # Debug: Print first 15 filtered lines
-            print(f"\n   📄 Filtered page content (first 15 lines):")
-            for i, line in enumerate(lines[:15]):
-                print(f"      [{i}] {line[:80]}")
-            
-            # Extract Name (first clean line that looks like a name)
+            # Extract Name
             name = "Not found"
             for line in lines[:10]:
                 if len(line) > 3 and len(line) < 100:
-                    # Names usually have spaces or are proper length
                     if (' ' in line and not line.startswith('http')) or (8 < len(line) < 50):
                         name = line
                         break
-            
             profile_data['name'] = name
             
-            # Extract Headline (look for job title / description after name)
+            # Extract Headline
             headline = "Not found"
             found_name_idx = -1
-            
-            # Find where name appears
             for i, line in enumerate(lines[:20]):
                 if name != "Not found" and name in line:
                     found_name_idx = i
                     break
             
-            # Headline is usually 1-3 lines after name
             if found_name_idx >= 0:
                 for j in range(found_name_idx + 1, min(found_name_idx + 6, len(lines))):
                     potential = lines[j]
-                    # Headline is usually longer and descriptive
                     if len(potential) > 20 and len(potential) < 300:
-                        # Skip connection count lines
                         if 'connection' not in potential.lower():
                             headline = potential
                             break
-            
-            # If still not found, look for lines with job keywords
-            if headline == "Not found":
-                for line in lines[:25]:
-                    if any(word in line for word in ['Engineer', 'Developer', 'Manager', 'Analyst', 
-                                                      'Designer', 'Seeking', 'Graduate', 'Student',
-                                                      'Specialist', 'Consultant']):
-                        if len(line) > 20 and 'followers' not in line.lower():
-                            headline = line
-                            break
-            
             profile_data['headline'] = headline
             
-            # Extract Location (look for India, cities, states)
+            # Extract Location
             location = "Not found"
             location_keywords = ['India', 'Mumbai', 'Delhi', 'Bangalore', 'Pune', 'Hyderabad', 
-                               'Chennai', 'Maharashtra', 'Karnataka', 'Gujarat', 'Nashik', 
-                               'Nagpur', 'Kalyan', 'Nasik']
-            
+                               'Chennai', 'Maharashtra', 'Karnataka', 'Gujarat', 'Nashik']
             for line in lines[:30]:
                 if any(keyword in line for keyword in location_keywords):
                     if len(line) < 100 and 'connection' not in line.lower():
                         location = line
                         break
-            
             profile_data['location'] = location
             
-            # Extract About section
+            # Extract About
             about = "Not found"
             about_idx = -1
-            
             for i, line in enumerate(lines):
                 if line.strip() == "About":
                     about_idx = i
                     break
             
             if about_idx > 0:
-                # Get text after About heading
                 about_lines = []
                 for j in range(about_idx + 1, min(about_idx + 15, len(lines))):
                     line = lines[j].strip()
-                    # Stop at next section
-                    if line in ['Activity', 'Experience', 'Education', 'Licenses & Certifications', 
-                               'Skills', 'Recommendations', 'Projects']:
+                    if line in ['Activity', 'Experience', 'Education', 'Skills']:
                         break
                     if len(line) > 10:
                         about_lines.append(line)
-                
                 if about_lines:
                     about = ' '.join(about_lines)[:500]
-            
             profile_data['about'] = about
             
-            # Extract Current Position/Company
+            # Extract Current Position
             position = "Not found"
-            
-            # Look for company/role keywords
             company_keywords = ['Technologies', 'Company', 'Corporation', 'Institute', 
                               'University', 'Pvt', 'Ltd', 'Solutions', 'Services']
-            
             for i, line in enumerate(lines):
                 if any(keyword in line for keyword in company_keywords):
                     if len(line) > 10 and len(line) < 200:
                         position = line
                         break
-            
-            # Also check Experience section
-            if position == "Not found":
-                exp_idx = -1
-                for i, line in enumerate(lines):
-                    if line == "Experience":
-                        exp_idx = i
-                        break
-                
-                if exp_idx > 0 and exp_idx + 1 < len(lines):
-                    # First item after Experience
-                    for j in range(exp_idx + 1, min(exp_idx + 5, len(lines))):
-                        if len(lines[j]) > 15 and len(lines[j]) < 200:
-                            position = lines[j]
-                            break
-            
             profile_data['current_position'] = position
             
             return profile_data
@@ -351,11 +311,9 @@ class LinkedInScraper:
         """Scroll the page to load all dynamic content"""
         try:
             scroll_pause = random.uniform(1, 2)
-            for _ in range(4):  # Scroll 4 times
+            for _ in range(4):
                 self.driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
                 time.sleep(scroll_pause)
-                
-                # Scroll back up a bit
                 if random.random() > 0.5:
                     self.driver.execute_script("window.scrollBy(0, -400);")
                     time.sleep(scroll_pause / 2)
@@ -370,13 +328,11 @@ class LinkedInScraper:
             print(f"\n{'='*60}")
             print(f"[{index}/{len(profile_urls)}]", end=" ")
             
-            # Scrape profile
             profile_data = self.scrape_profile(url)
             self.profiles_scraped.append(profile_data)
             
             print(f"{'='*60}")
             
-            # Add delays between profiles
             if index < len(profile_urls):
                 if index % 5 == 0:
                     print(f"\n⏸️  Taking a long break ({config.LONG_BREAK}s)...\n")
@@ -396,18 +352,14 @@ class LinkedInScraper:
             print("⚠️  No data to export!")
             return
         
-        # Get all keys
         all_keys = set()
         for profile in self.profiles_scraped:
             all_keys.update(profile.keys())
         
-        # Define column order
         column_order = ['name', 'headline', 'location', 'current_position', 'about', 'url']
         ordered_keys = [k for k in column_order if k in all_keys]
-        # Add any extra keys not in our predefined order
         ordered_keys.extend([k for k in sorted(all_keys) if k not in column_order])
         
-        # Write to CSV
         with open(config.OUTPUT_CSV, 'w', newline='', encoding='utf-8') as f:
             writer = csv.DictWriter(f, fieldnames=ordered_keys)
             writer.writeheader()
@@ -416,7 +368,6 @@ class LinkedInScraper:
         print(f"✅ Data exported successfully!")
         print(f"   📁 File: {config.OUTPUT_CSV}")
         
-        # Summary
         success_count = sum(1 for p in self.profiles_scraped 
                           if 'ERROR' not in str(p.get('name', '')) 
                           and p.get('name') != 'Not found')
