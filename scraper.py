@@ -1,16 +1,14 @@
 import time
 import random
 import csv
-import re
 import os
+import subprocess
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from selenium.webdriver.common.keys import Keys
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
 from selenium_stealth import stealth
 from bs4 import BeautifulSoup
 import config
@@ -27,7 +25,7 @@ class LinkedInScraper:
         # Check if we should run headless (from config)
         if config.HEADLESS_MODE:
             print("   🎭 Running in HEADLESS mode (production)")
-            # Production headless settings for Railway
+            # Production headless settings
             chrome_options.add_argument('--headless=new')
             chrome_options.add_argument('--no-sandbox')
             chrome_options.add_argument('--disable-dev-shm-usage')
@@ -37,15 +35,11 @@ class LinkedInScraper:
             chrome_options.add_argument('--disable-extensions')
             chrome_options.add_argument('--disable-setuid-sandbox')
             chrome_options.add_argument('--remote-debugging-port=9222')
-            
-            # Binary location for Docker/Railway (if Chrome is in standard location)
-            chrome_options.binary_location = '/usr/bin/google-chrome'
         else:
             print("   🖥️  Running in VISIBLE mode (local development)")
-            # Non-headless settings for local testing
             chrome_options.add_argument("--start-maximized")
         
-        # Common settings (both headless and visible)
+        # Common settings
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -54,32 +48,42 @@ class LinkedInScraper:
         user_agent = random.choice(config.USER_AGENTS)
         chrome_options.add_argument(f'user-agent={user_agent}')
         
-        # Initialize driver with webdriver-manager for automatic driver management
+        # Initialize driver
         try:
-            print("   🔧 Attempting to initialize Chrome with webdriver-manager...")
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            print("   🔧 Attempting to initialize Chrome...")
+            
+            if config.IS_RAILWAY:
+                # Railway production: use system chromium
+                print("   🚂 Railway detected - using system chromium")
+                
+                # Find chromium and chromedriver paths
+                try:
+                    chromium_path = subprocess.check_output(['which', 'chromium']).decode().strip()
+                    chromedriver_path = subprocess.check_output(['which', 'chromedriver']).decode().strip()
+                    print(f"   📍 Chromium: {chromium_path}")
+                    print(f"   📍 ChromeDriver: {chromedriver_path}")
+                except subprocess.CalledProcessError:
+                    # Fallback to common paths
+                    chromium_path = '/usr/bin/chromium'
+                    chromedriver_path = '/usr/bin/chromedriver'
+                    print(f"   📍 Using fallback paths")
+                
+                chrome_options.binary_location = chromium_path
+                service = Service(chromedriver_path)
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                
+            else:
+                # Local development: use webdriver-manager
+                print("   💻 Local development - using webdriver-manager")
+                from webdriver_manager.chrome import ChromeDriverManager
+                service = Service(ChromeDriverManager().install())
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            
             print("   ✅ Chrome initialized successfully")
+            
         except Exception as e:
-            print(f"   ⚠️ Error initializing Chrome: {e}")
-            print("   🔄 Trying fallback Chrome setup...")
-            
-            # Fallback: try without binary location
-            chrome_options_fallback = webdriver.ChromeOptions()
-            if config.HEADLESS_MODE:
-                chrome_options_fallback.add_argument('--headless=new')
-            chrome_options_fallback.add_argument('--no-sandbox')
-            chrome_options_fallback.add_argument('--disable-dev-shm-usage')
-            chrome_options_fallback.add_argument('--disable-gpu')
-            chrome_options_fallback.add_argument('--remote-debugging-port=9222')
-            
-            try:
-                service_fallback = Service(ChromeDriverManager().install())
-                self.driver = webdriver.Chrome(service=service_fallback, options=chrome_options_fallback)
-                print("   ✅ Chrome initialized with fallback settings")
-            except Exception as e2:
-                print(f"   ❌ Fallback also failed: {e2}")
-                raise Exception(f"Chrome initialization failed: {e2}")
+            print(f"   ❌ Fatal error: {e}")
+            raise Exception(f"Chrome initialization failed: {e}")
         
         # Apply stealth settings
         platform_val = "Linux" if config.HEADLESS_MODE else "Win32"
@@ -100,30 +104,24 @@ class LinkedInScraper:
         print("🔐 Logging into LinkedIn...")
         
         try:
-            # Navigate to LinkedIn login page
             self.driver.get("https://www.linkedin.com/login")
             time.sleep(random.uniform(2, 4))
             
-            # Find and fill email field
             email_field = self.wait.until(
                 EC.presence_of_element_located((By.ID, "username"))
             )
             self._human_type(email_field, config.LINKEDIN_EMAIL)
             time.sleep(random.uniform(1, 2))
             
-            # Find and fill password field
             password_field = self.driver.find_element(By.ID, "password")
             self._human_type(password_field, config.LINKEDIN_PASSWORD)
             time.sleep(random.uniform(1, 2))
             
-            # Click login button
             login_button = self.driver.find_element(By.CSS_SELECTOR, "button[type='submit']")
             login_button.click()
             
-            # Wait for login to complete
             time.sleep(random.uniform(8, 12))
             
-            # Check if login was successful
             current_url = self.driver.current_url
             
             if "feed" in current_url or "mynetwork" in current_url:
@@ -161,21 +159,15 @@ class LinkedInScraper:
         print(f"\n📊 Scraping: {profile_url}")
         
         try:
-            # Navigate to profile
             self.driver.get(profile_url)
-            
-            # Wait for page to load
             time.sleep(random.uniform(6, 10))
             
-            # Check if we actually got to a profile page
             current_url = self.driver.current_url
             page_title = self.driver.title
             
-            # Debug info
             print(f"   📍 Loaded URL: {current_url}")
             print(f"   📄 Page Title: {page_title}")
             
-            # Check for blocks
             if "authwall" in current_url:
                 print("   🚫 BLOCKED: AuthWall detected")
                 return self._create_error_profile(profile_url, "AuthWall")
@@ -186,14 +178,11 @@ class LinkedInScraper:
                 self.driver.get(profile_url)
                 time.sleep(8)
             
-            # Scroll to load content
             self._scroll_page()
             time.sleep(random.uniform(3, 5))
             
-            # Extract data using text-based method
             profile_data = self._extract_from_page_text(profile_url)
             
-            # Show what we extracted
             print(f"   ✅ Name: {profile_data.get('name', 'N/A')}")
             print(f"   ✅ Headline: {profile_data.get('headline', 'N/A')[:50]}...")
             
@@ -208,11 +197,9 @@ class LinkedInScraper:
         profile_data = {'url': url}
         
         try:
-            # Get all visible text
             page_text = self.driver.find_element(By.TAG_NAME, "body").text
             lines = [line.strip() for line in page_text.split('\n') if line.strip()]
             
-            # Remove duplicates
             seen = set()
             unique_lines = []
             for line in lines:
@@ -222,7 +209,6 @@ class LinkedInScraper:
             
             lines = unique_lines
             
-            # Skip keywords
             skip_keywords = [
                 'home', 'my network', 'jobs', 'messaging', 'notifications', 'search', 
                 'menu', 'for business', 'accessibility', 'linkedin corporation',
@@ -231,7 +217,6 @@ class LinkedInScraper:
                 'safety center', '© 2025', 'try premium'
             ]
             
-            # Filter lines
             filtered_lines = []
             for line in lines:
                 line_lower = line.lower()
