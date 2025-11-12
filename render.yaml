@@ -4,16 +4,16 @@ services:
     env: python
     region: oregon
     plan: free
-    buildCommand: pip install -r requirements.txt && playwright install chromium
-    startCommand: gunicorn app:app
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --timeout 300
     envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.9
       - key: LINKEDIN_EMAIL
         sync: false
       - key: LINKEDIN_PASSWORD
         sync: false
-      - key: FLASK_ENV
-        value: production
       - key: HEADLESS_MODE
         value: true
-      - key: FLASK_SECRET_KEY
-        generateValue: true
+      - key: FLASK_ENV
+        value: production

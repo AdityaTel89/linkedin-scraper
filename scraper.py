@@ -2,6 +2,7 @@ import time
 import random
 import csv
 import re
+import os
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -20,7 +21,22 @@ class LinkedInScraper:
         
         # Setup Chrome options
         chrome_options = webdriver.ChromeOptions()
-        chrome_options.add_argument("--start-maximized")
+        
+        # Production/deployment settings (Railway, Render, etc.)
+        chrome_options.add_argument('--headless=new')
+        chrome_options.add_argument('--no-sandbox')
+        chrome_options.add_argument('--disable-dev-shm-usage')
+        chrome_options.add_argument('--disable-gpu')
+        chrome_options.add_argument('--disable-software-rasterizer')
+        chrome_options.add_argument('--disable-extensions')
+        chrome_options.add_argument('--disable-setuid-sandbox')
+        chrome_options.add_argument('--single-process')
+        chrome_options.add_argument('--disable-web-security')
+        
+        # Window size for headless
+        chrome_options.add_argument('--window-size=1920,1080')
+        
+        # Anti-detection
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
@@ -29,17 +45,26 @@ class LinkedInScraper:
         user_agent = random.choice(config.USER_AGENTS)
         chrome_options.add_argument(f'user-agent={user_agent}')
         
-        if config.HEADLESS_MODE:
-            chrome_options.add_argument("--headless")
-        
-        # Initialize driver
-        self.driver = webdriver.Chrome(options=chrome_options)
+        # Initialize driver with error handling
+        try:
+            print("   🔧 Attempting to initialize Chrome...")
+            self.driver = webdriver.Chrome(options=chrome_options)
+            print("   ✅ Chrome initialized successfully")
+        except Exception as e:
+            print(f"   ⚠️ Error initializing Chrome: {e}")
+            print("   🔄 Trying alternative Chrome setup...")
+            # Try without some problematic options
+            chrome_options_fallback = webdriver.ChromeOptions()
+            chrome_options_fallback.add_argument('--headless')
+            chrome_options_fallback.add_argument('--no-sandbox')
+            chrome_options_fallback.add_argument('--disable-dev-shm-usage')
+            self.driver = webdriver.Chrome(options=chrome_options_fallback)
         
         # Apply stealth settings
         stealth(self.driver,
                 languages=["en-US", "en"],
                 vendor="Google Inc.",
-                platform="Win32",
+                platform="Linux",
                 webgl_vendor="Intel Inc.",
                 renderer="Intel Iris OpenGL Engine",
                 fix_hairline=True)
@@ -85,13 +110,11 @@ class LinkedInScraper:
             elif "checkpoint" in current_url or "challenge" in current_url:
                 print("⚠️  LinkedIn security challenge detected!")
                 print("   Please complete verification in the browser window...")
-                input("   Press Enter after completing the challenge...")
-                return True
+                return False  # Can't handle CAPTCHA in headless mode
             else:
                 print("⚠️  Login status unclear")
                 print(f"   Current URL: {current_url}")
-                input("   Press Enter to continue if you see you're logged in...")
-                return True
+                return False
                 
         except Exception as e:
             print(f"❌ Login failed: {str(e)}")
@@ -125,7 +148,6 @@ class LinkedInScraper:
             # Check for blocks
             if "authwall" in current_url:
                 print("   🚫 BLOCKED: AuthWall detected")
-                self.driver.save_screenshot(f'blocked_{int(time.time())}.png')
                 return self._create_error_profile(profile_url, "AuthWall")
             
             if "feed" in current_url or current_url == "https://www.linkedin.com/":
@@ -138,11 +160,6 @@ class LinkedInScraper:
             # Scroll to load content
             self._scroll_page()
             time.sleep(random.uniform(3, 5))
-            
-            # Save debug files
-            with open('debug_last_profile.html', 'w', encoding='utf-8') as f:
-                f.write(self.driver.page_source)
-            self.driver.save_screenshot('debug_last_screenshot.png')
             
             # Extract data using text-based method (most reliable)
             profile_data = self._extract_from_page_text(profile_url)
@@ -415,5 +432,8 @@ class LinkedInScraper:
     def close(self):
         """Close the browser"""
         print("\n🔒 Closing browser...")
-        self.driver.quit()
-        print("✅ Browser closed. Scraping session ended.")
+        try:
+            self.driver.quit()
+            print("✅ Browser closed. Scraping session ended.")
+        except Exception as e:
+            print(f"⚠️ Error closing browser: {e}")
