@@ -46,7 +46,7 @@ RUN apt-get update && apt-get install -y \
     xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Chrome (new method without apt-key)
+# Install Chrome
 RUN wget -q -O /tmp/google-chrome-stable_current_amd64.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
     && apt-get update \
     && apt-get install -y /tmp/google-chrome-stable_current_amd64.deb \
@@ -77,17 +77,12 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p logs debug
 
-# Expose port
+# Expose port (Railway uses 8080 by default)
 EXPOSE 8080
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV PORT=8080
 ENV DISPLAY=:99
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:8080/health || exit 1
-
-# Run gunicorn
-CMD ["gunicorn", "app:app", "--bind", "0.0.0.0:8080", "--timeout", "300", "--workers", "1", "--access-logfile", "-", "--error-logfile", "-"]
+# Run with shell to expand PORT variable
+CMD sh -c "gunicorn app:app --bind 0.0.0.0:${PORT:-8080} --timeout 300 --workers 1 --access-logfile - --error-logfile -"
